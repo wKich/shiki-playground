@@ -1,6 +1,6 @@
 <template>
-  <div id="previewer" :style="{ color: fgColor, backgroundColor: bgColor }">
-    <div id="preview-container">
+  <div id="editor" :style="{ color: fgColor, backgroundColor: bgColor }">
+    <div id="editor-container">
       <div
         id="shiki-output"
         :class="{ active: showPreview }"
@@ -27,10 +27,10 @@ export default defineComponent({
   },
   computed: {
     code(): string {
-      return this.$store.state.code
+      return this.$store.state.themeCode
     },
     langToShow(): string {
-      return this.$store.state.previewLang || this.$store.state.lang
+      return 'jsonc'
     },
     themeToShow(): string {
       return this.$store.state.previewTheme || this.$store.state.theme
@@ -48,7 +48,7 @@ export default defineComponent({
       await this.updateHighlighter()
     },
     async rawCode(c) {
-      this.$store.commit('changeCode', c)
+      this.$store.dispatch('changeThemeCode', c)
       this.refreshPreview()
     },
     async langToShow() {
@@ -75,13 +75,13 @@ export default defineComponent({
 </script>
 
 <style>
-#previewer {
+#editor {
   position: relative;
   height: 100%;
   border-left: var(--border);
   overflow: auto;
 }
-#preview-container {
+#editor-container {
   position: absolute;
   width: auto;
   display: inline-block;

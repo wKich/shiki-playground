@@ -1,0 +1,166 @@
+(* other part *)
+
+
+type lattice_base = {
+  next_cipher: (int, int) Hashtbl.t;
+  xF_val: int;
+  xZ_val: int;
+  max: int array;
+  graph_gaps: (int, (int * int * int) list) Hashtbl.t;
+}
+
+let compute_graph xR_low xW_low xF_val xZ_val max graph_gaps =
+  let fact n = Z.factorial (Z.of_int n) in
+  let num_states =
+    if xR_low < xW_low then compute_graph xW_low xR_low xF_val xZ_val max graph_gaps
+    else if xR_low < 0 || xW_low < 0 || xR_low >= xZ_val || xW_low >= xZ_val || xW_low >= xF_val || xR_low >= max.(xW_low) then
+      0
+    else
+      let numerator = fact (xR_low + xW_low) in
+      let denominator = (fact xR_low) * (fact xW_low) in
+      Z.to_int (numerator / denominator)
+  in
+  num_states
+
+let count xR_low =
+  if xR_low > 2 then Z.to_int (Z.log2 (Z.of_int xR_low) / 6 - Z.of_int 1)
+  else xR_low
+
+let rec noise_base xR_low xW_low max graph_gaps =
+  match max with
+  | 0 ->
+      if xR_low < xW_low then noise_base xW_low xR_low (1 - max) graph_gaps
+      else begin
+        let new_xW_low =
+          if max = 1 then xW_low + 1
+          else xW_low
+        in
+        let new_xR_low = ref (count xR_low) in
+        while
+          not (Hashtbl.mem graph_gaps !new_xR_low) ||
+          not (Hashtbl.mem (Hashtbl.find graph_gaps !new_xR_low) new_xW_low)
+        do
+          if new_xW_low < 2 then new_xR_low := !new_xR_low - 1
+          else begin
+            new_xR_low := Z.to_int ((Z.of_int !new_xR_low * (Z.of_int new_xW_low - Z.of_int 1) + (Z.of_int new_xW_low / Z.of_int 2)) / Z.of_int new_xW_low);
+            new_xW_low := !new_xW_low - 1
+          end
+        done;
+        (!new_xR_low, !new_xW_low)
+      end
+  | 1 ->
+      if xR_low < xW_low then noise_base xW_low xR_low (1 - max) graph_gaps
+      else begin
+        let new_xW_low = xW_low + 1 in
+        let new_xR_low = ref (count xR_low) in
+        while
+          not (Hashtbl.mem graph_gaps !new_xR_low) ||
+          not (Hashtbl.mem (Hashtbl.find graph_gaps !new_xR_low) new_xW_low)
+        do
+          if new_xW_low < 2 then new_xR_low := !new_xR_low - 1
+          else begin
+            new_xR_low := Z.to_int ((Z.of_int !new_xR_low * (Z.of_int new_xW_low - Z.of_int 1) + (Z.of_int new_xW_low / Z.of_int 2)) / Z.of_int new_xW_low);
+            new_xW_low := new_xW_low - 1
+          end
+        done;
+        (!new_xR_low, !new_xW_low)
+      end
+  | _ -> (xR_low, xW_low)
+
+let compute_ilog_table () =
+  let ilog_table = Array.make 4566 0 in
+  let rec loop x acc =
+    if x < 4566 then
+      Array.blit acc 0 ilog_table 0 4566
+    else
+      let numerator = 0xFFFF + (0xFFFF lsr (2 * x - 1)) in
+      let acc' = Array.append acc [|numerator lsr 24|] in
+      loop (x + 1) acc'
+  in
+  loop 2 [||];
+  ilog_table
+
+let lattice_determinant () =
+  let next_cipher = Hashtbl.create 1024 in
+  let xF_val = 5 in
+  let xZ_val = 64 in
+  let max = [|412; 451; 131; 60; 51|] in
+  let graph_gaps = Hashtbl.create xZ_val in
+  let rec init_graph_gaps i =
+    if i < xZ_val then begin
+      Hashtbl.add graph_gaps i [];
+      init_graph_gaps (i + 1)
+    end
+  in
+  init_graph_gaps 0;
+  
+  let rec update_graph_gaps acc i =
+    if i < xZ_val then
+      let update_state acc xW_low =
+        let xR_low = i - xW_low in
+        let base = compute_graph xR_low xW_low xF_val xZ_val max graph_gaps in
+        match base with
+        | 0 -> acc
+        | _ ->
+            let current_state =
+              match acc with
+              | None -> 0
+              | Some c -> c
+            in
+            Hashtbl.add (Hashtbl.find graph_gaps xR_low) xW_low (current_state, base);
+            current_state + base
+      in
+      update_graph_gaps (Some (List.fold_left update_state acc (List.init (i + 1) (fun x -> x)))) (i + 1)
+    else acc
+  in
+  let current = update_graph_gaps None 0 in
+  
+  let rec update_cipher current i =
+    if i < xZ_val then
+      let update_cipher_helper current xW_low =
+        let xR_low = i - xW_low in
+        match Hashtbl.find_opt (Hashtbl.find graph_gaps xR_low) xW_low with
+        | Some (base, num_states) ->
+            if num_states = 0 then current
+            else
+              let update_next_cipher acc j =
+                let xr0, xw0, xr1, xw1, base_R, base_W =
+                  if current < 15 then
+                    let xr0 = xR_low + 1 in
+                    let xw0 = xW_low in
+                    let xr1 = xR_low in
+                    let xw1 = xW_low + 1 in
+                    let base_R = base + current - base in
+                    let base_W =
+                      base + current - base +
+                      if xR_low > 0 then Hashtbl.find (Hashtbl.find graph_gaps (xR_low - 1)) (xW_low + 1) else 0
+                    in
+                    (xr0, xw0, xr1, xw1, base_R, base_W)
+                  else if num_states <> 0 then
+                    let xr0, xw0 = noise_base xR_low xW_low 0 graph_gaps in
+                    let xr1, xw1 = noise_base xR_low xW_low 1 graph_gaps in
+                    let base_R = base in
+                    let base_W = base + if num_states > 1 then 1 else 0 in
+                    (xr0, xw0, xr1, xw1, base_R, base_W)
+                  else (xR_low, xW_low, xR_low, xW_low, base, base)
+                in
+                
+                let current_state =
+                  match acc with
+                  | None -> 0
+                  | Some c -> c
+                in
+                Hashtbl.add next_cipher (current_state * 4) base_R;
+                Hashtbl.add next_cipher (current_state * 4 + 1) base_W;
+                Hashtbl.add next_cipher (current_state * 4 + 2) xR_low;
+                Hashtbl.add next_cipher (current_state * 4 + 3) xW_low;
+                current_state + 1
+              in
+              update_cipher_helper (Some (List.fold_left update_next_cipher None (List.init num_states (fun x -> x)))) (xW_low + 1)
+        | None -> acc
+      in
+      update_cipher (update_cipher_helper current 0) (i + 1)
+    else ()
+  in
+  update_cipher current 0;
+  { next_cipher; xF_val; xZ_val; max; graph_gaps }

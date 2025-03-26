@@ -60,11 +60,7 @@ export default defineComponent({
     }
   },
   async mounted() {
-    if (window.__theme === 'dark') {
-      await this.$store.dispatch('loadAndChangeTheme', 'github-dark')
-    } else {
-      await this.$store.dispatch('loadAndChangeTheme', 'github-light')
-    }
+    await this.$store.dispatch('loadAndChangeTheme', 'monokai')
   }
 })
 </script>

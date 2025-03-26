@@ -23,6 +23,7 @@ export interface State {
   lang: string
   previewLang: string
   code: string
+  themeCode: string
   fgColor: string
   bgColor: string
   font: string
@@ -45,7 +46,8 @@ export const store = createStore<State>({
       previewTheme: '',
       lang: '',
       previewLang: '',
-      code: '',
+      code: localStorage.getItem('code') || '',
+      themeCode: '',
       fgColor: '',
       bgColor: '',
       font: defaultFont,
@@ -86,6 +88,11 @@ export const store = createStore<State>({
     },
     changeCode(state, c) {
       state.code = c
+      localStorage.setItem('code', c)
+    },
+    changeThemeCode(state, c) {
+      state.themeCode = c
+      localStorage.setItem('themeCode', c)
     },
     changeFont(state, font) {
       state.font = font
@@ -97,13 +104,24 @@ export const store = createStore<State>({
   actions: {
     async changeTheme(ctx, t) {
       ctx.commit('changeTheme', t)
-      const colors = extractColors(highlighter.getTheme(t))
+      const theme = highlighter.getTheme(t)
+      const colors = extractColors(theme)
       setThemeVariables(
         highlighter.getForegroundColor(t),
         highlighter.getBackgroundColor(t),
         colors
       )
+      ctx.commit('changeThemeCode', JSON.stringify(theme, null, 2))
       ctx.commit('changeThemeColors', colors.mainColors)
+    },
+    async changeThemeCode(ctx, c) {
+      ctx.commit('changeThemeCode', c)
+      try {
+        const theme = JSON.parse(c)
+        await ctx.dispatch('loadAndChangeTheme', theme)
+      } catch (e) {
+        console.error(e)
+      }
     },
     async loadAndChangeTheme(ctx, t) {
       await highlighter.loadTheme(t)
@@ -120,12 +138,10 @@ export const store = createStore<State>({
     async changeLang(ctx, langId) {
       const samplePath = getLangSamplePath(langId)
 
-      if (samplePath) {
+      if (ctx.state.code === '') {
         const res = await fetch(`/shiki/samples/${samplePath}`)
         const text = await res.text()
         ctx.commit('changeCode', text)
-      } else if (ctx.state.code === '') {
-        ctx.commit('changeCode', '// type your code')
       }
       ctx.commit('changeLang', langId)
     },
@@ -191,6 +207,10 @@ export const store = createStore<State>({
 })
 
 function getLangSamplePath(langId: Lang) {
+  if (langId === 'ocaml') {
+    return 'ocaml.sample'
+  }
+
   const langRegistration = BUNDLED_LANGUAGES.filter(l => l.id === langId)[0]
 
   return langRegistration?.samplePath
